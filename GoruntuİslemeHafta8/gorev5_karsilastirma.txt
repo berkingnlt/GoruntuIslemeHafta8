@@ -1,0 +1,20 @@
+TEN TESPITI KARSILASTIRMASI
+
+RGB: R>50, G>20, B>10, max-min>15, |R-G|>10, R>G, R>B.
+YCbCr: 133<=Cr<=173, 77<=Cb<=127.
+HSV: 0<=H<=25, 40<=S<=230, V>=35.
+
+RGB ten adayi: 273990 piksel, %32.6256
+YCbCr ten adayi: 234407 piksel, %27.9122
+HSV ten adayi: 267690 piksel, %31.8754
+
+YORUM:
+Ten adayi pikseller orijinal renkleriyle korunmus, diger pikseller tam kirmizi yapilmistir.
+Maskelerde beyaz ten adayi, siyah ten disidir.
+
+RGB'de parlaklik ve renk bilgisi birlikte degistigi icin sabit esikler isiktan etkilenir.
+YCbCr'de renk farki kanallari, HSV'de ise ton ve doygunluk bilgisi kullanilabilir.
+Bu ayrimlar ten tespitini kolaylastirabilir; ancak aydinlatmadan tam bagimsizlik saglamaz.
+
+Kullanilan esikler baslangic degerleridir. Farkli ten tonlari ve golgeler kacirilabilir; ten rengine benzeyen kiyafet veya arka planlar yanlis secilebilir.
+Secilen piksel yuzdesi basari orani degildir. Dogruluk icin elle etiketlenmis referans maske gerekir.
