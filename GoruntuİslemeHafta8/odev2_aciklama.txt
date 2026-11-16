@@ -1,0 +1,12 @@
+RGB, HSV ve Lab uzaylarinda kirmizi maskeleri olusturulmustur.
+En az iki yontemin destekledigi pikseller ortak maskeye alinmistir.
+Gri goruntude HoughCircles ile cember adaylari bulunmustur.
+Cevresindeki acilarin en az %55'inde kirmizi destegi olan adaylar kabul edilmistir.
+Sonuclardaki yesil cemberler kabul edilen adaylardir.
+
+Esikler baslangic degerleridir; veriyle test edilip ayarlanmalidir.
+Egik, kucuk, bulanik veya kismen kapali isaretler kacirilabilir.
+Kirmizi dairesel baska nesneler yanlis tespit edilebilir.
+Bu sistem isaretin anlamini siniflandirmaz.
+Kucuk goruntuleri buyutmek yeni ayrinti eklemez.
+Raporlanan sayilar dogruluk orani degildir; dogruluk icin etiketli referans gerekir.

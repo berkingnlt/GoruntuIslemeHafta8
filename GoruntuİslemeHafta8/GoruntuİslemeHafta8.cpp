@@ -1,230 +1,364 @@
 ﻿#include <opencv2/opencv.hpp>
 #include <iostream>
-#include <string>
 #include <fstream>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <cmath>
 
 using namespace cv;
 using namespace std;
 
-int main()
+void dosyalariBul(vector<String>& dosyalar)
 {
-    VideoCapture kamera(0);
+    vector<String> bulunanlar;
 
-    if (!kamera.isOpened())
+    const string uzantilar[] = {
+        "*.jpg", "*.jpeg", "*.png", "*.bmp", "*.ppm"
+    };
+
+    for (const string& uzanti : uzantilar)
     {
-        cerr << "Web kamerasi acilamadi!" << endl;
-        return -1;
+        bulunanlar.clear();
+        glob("trafik/" + uzanti, bulunanlar, true);
+
+        dosyalar.insert(
+            dosyalar.end(),
+            bulunanlar.begin(),
+            bulunanlar.end()
+        );
     }
 
-    const int farkEsigi = 25;
-    const int minimumHareketPikseli = 500;
-    const double minimumBolgeAlani = 150.0;
+    sort(dosyalar.begin(), dosyalar.end());
 
-    Mat oncekiGri;
+    dosyalar.erase(
+        unique(dosyalar.begin(), dosyalar.end()),
+        dosyalar.end()
+    );
+}
+
+void kirmiziMaskeleri(
+    const Mat& resim,
+    Mat& rgbMaske,
+    Mat& hsvMaske,
+    Mat& labMaske,
+    Mat& ortakMaske)
+{
+    Mat hsv, lab;
+    cvtColor(resim, hsv, COLOR_BGR2HSV);
+    cvtColor(resim, lab, COLOR_BGR2Lab);
+
+    rgbMaske = Mat::zeros(resim.size(), CV_8UC1);
+    hsvMaske = Mat::zeros(resim.size(), CV_8UC1);
+    labMaske = Mat::zeros(resim.size(), CV_8UC1);
+    ortakMaske = Mat::zeros(resim.size(), CV_8UC1);
+
+    for (int y = 0; y < resim.rows; y++)
+    {
+        for (int x = 0; x < resim.cols; x++)
+        {
+            Vec3b p = resim.at<Vec3b>(y, x);
+            Vec3b h = hsv.at<Vec3b>(y, x);
+            Vec3b l = lab.at<Vec3b>(y, x);
+
+            int B = p[0], G = p[1], R = p[2];
+
+            bool rgbKirmizi =
+                R > 70 &&
+                R > 1.3 * G &&
+                R > 1.3 * B;
+
+            bool hsvKirmizi =
+                (h[0] <= 10 || h[0] >= 170) &&
+                h[1] >= 80 &&
+                h[2] >= 50;
+
+            bool labKirmizi =
+                l[1] >= 150 &&
+                l[2] >= 120;
+
+            rgbMaske.at<uchar>(y, x) = rgbKirmizi ? 255 : 0;
+            hsvMaske.at<uchar>(y, x) = hsvKirmizi ? 255 : 0;
+            labMaske.at<uchar>(y, x) = labKirmizi ? 255 : 0;
+
+            int oy =
+                static_cast<int>(rgbKirmizi) +
+                static_cast<int>(hsvKirmizi) +
+                static_cast<int>(labKirmizi);
+
+            ortakMaske.at<uchar>(y, x) = oy >= 2 ? 255 : 0;
+        }
+    }
+
     Mat cekirdek = getStructuringElement(
-        MORPH_RECT, Size(3, 3)
+        MORPH_ELLIPSE, Size(3, 3)
     );
 
-    int kayitSayisi = 0;
+    morphologyEx(
+        ortakMaske, ortakMaske,
+        MORPH_CLOSE, cekirdek
+    );
+}
 
-    cout << "S: Goruntuleri kaydet\n";
-    cout << "Q veya ESC: Cikis\n";
+double cevreKirmiziOrani(const Mat& maske, const Vec3f& c)
+{
+    const int aciSayisi = 180;
+    int desteklenen = 0;
 
-    while (true)
+    int bant = cvRound(c[2] * 0.15);
+    if (bant < 2)
+        bant = 2;
+
+    for (int t = 0; t < aciSayisi; t++)
     {
-        Mat kare;
+        double aci = 2.0 * CV_PI * t / aciSayisi;
+        bool kirmiziVar = false;
 
-        if (!kamera.read(kare) || kare.empty())
+        for (int dr = -bant; dr <= bant; dr++)
         {
-            cerr << "Kameradan goruntu alinamadi." << endl;
-            break;
-        }
+            double r = c[2] + dr;
 
-        resize(kare, kare, Size(640, 480));
+            if (r <= 0)
+                continue;
 
-        Mat gri;
-        cvtColor(kare, gri, COLOR_BGR2GRAY);
-        GaussianBlur(gri, gri, Size(5, 5), 0);
+            int x = cvRound(c[0] + r * cos(aci));
+            int y = cvRound(c[1] + r * sin(aci));
 
-        if (oncekiGri.empty())
-        {
-            oncekiGri = gri.clone();
-            continue;
-        }
-
-        Mat fark, hareketMaskesi;
-        absdiff(gri, oncekiGri, fark);
-        threshold(fark, hareketMaskesi, farkEsigi, 255, THRESH_BINARY);
-
-        morphologyEx(
-            hareketMaskesi, hareketMaskesi,
-            MORPH_OPEN, cekirdek
-        );
-
-        morphologyEx(
-            hareketMaskesi, hareketMaskesi,
-            MORPH_CLOSE, cekirdek
-        );
-
-        int hareketPikseli = countNonZero(hareketMaskesi);
-
-        Mat sonuc = kare.clone();
-        Mat tenMaskesi = Mat::zeros(kare.size(), CV_8UC1);
-
-        int roiSayisi = 0;
-
-        if (hareketPikseli >= minimumHareketPikseli)
-        {
-            vector<vector<Point>> konturlar;
-
-            Mat konturGirdisi = hareketMaskesi.clone();
-
-            findContours(
-                konturGirdisi,
-                konturlar,
-                RETR_EXTERNAL,
-                CHAIN_APPROX_SIMPLE
-            );
-
-            for (const auto& kontur : konturlar)
+            if (x < 0 || y < 0 ||
+                x >= maske.cols || y >= maske.rows)
             {
-                if (kontur.size() < 3)
-                    continue;
+                continue;
+            }
 
-                int sol = kontur[0].x;
-                int sag = kontur[0].x;
-                int ust = kontur[0].y;
-                int alt = kontur[0].y;
-
-                double ikiAlan = 0.0;
-
-                for (size_t i = 0; i < kontur.size(); i++)
-                {
-                    Point p = kontur[i];
-                    Point sonraki = kontur[(i + 1) % kontur.size()];
-
-                    ikiAlan +=
-                        static_cast<double>(p.x) * sonraki.y -
-                        static_cast<double>(sonraki.x) * p.y;
-
-                    if (p.x < sol) sol = p.x;
-                    if (p.x > sag) sag = p.x;
-                    if (p.y < ust) ust = p.y;
-                    if (p.y > alt) alt = p.y;
-                }
-
-                double alan = (ikiAlan < 0 ? -ikiAlan : ikiAlan) / 2.0;
-
-                if (alan < minimumBolgeAlani)
-                    continue;
-
-                Rect roi(sol, ust, sag - sol + 1, alt - ust + 1);
-
-                Mat ycrcb, yerelTenMaskesi;
-
-                cvtColor(kare(roi), ycrcb, COLOR_BGR2YCrCb);
-
-                inRange(
-                    ycrcb,
-                    Scalar(0, 133, 77),
-                    Scalar(255, 173, 127),
-                    yerelTenMaskesi
-                );
-
-                bitwise_and(
-                    yerelTenMaskesi,
-                    hareketMaskesi(roi),
-                    yerelTenMaskesi
-                );
-
-                Mat hedefMaske = tenMaskesi(roi);
-
-                bitwise_or(
-                    hedefMaske,
-                    yerelTenMaskesi,
-                    hedefMaske
-                );
-
-                rectangle(sonuc, roi, Scalar(0, 255, 255), 2);
-
-                roiSayisi++;
+            if (maske.at<uchar>(y, x) != 0)
+            {
+                kirmiziVar = true;
+                break;
             }
         }
 
-        sonuc.setTo(Scalar(0, 255, 0), tenMaskesi);
-
-        putText(
-            sonuc,
-            "Hareket: " + to_string(hareketPikseli) +
-            "  ROI: " + to_string(roiSayisi),
-            Point(10, 25),
-            FONT_HERSHEY_SIMPLEX,
-            0.6,
-            Scalar(255, 255, 255),
-            2
-        );
-
-        putText(
-            sonuc,
-            "Ten adayi: " + to_string(countNonZero(tenMaskesi)),
-            Point(10, 50),
-            FONT_HERSHEY_SIMPLEX,
-            0.6,
-            Scalar(255, 255, 255),
-            2
-        );
-
-        imshow("Orijinal", kare);
-        imshow("Hareket Maskesi", hareketMaskesi);
-        imshow("Hareketli ROI - Ten Tespiti", sonuc);
-        imshow("Hareketli Ten Maskesi", tenMaskesi);
-
-        oncekiGri = gri.clone();
-
-        int tus = waitKey(1);
-
-        if (tus == 27 || tus == 'q' || tus == 'Q')
-            break;
-
-        if (tus == 's' || tus == 'S')
-        {
-            string onEk =
-                "odev1_kayit_" + to_string(++kayitSayisi);
-
-            bool basarili = true;
-
-            basarili &= imwrite(onEk + "_orijinal.bmp", kare);
-            basarili &= imwrite(onEk + "_hareket.bmp", hareketMaskesi);
-            basarili &= imwrite(onEk + "_ten_maskesi.bmp", tenMaskesi);
-            basarili &= imwrite(onEk + "_sonuc.bmp", sonuc);
-
-            cout << (basarili ? "Kaydedildi: " : "Kayit hatasi: ")
-                << onEk << endl;
-        }
+        if (kirmiziVar)
+            desteklenen++;
     }
 
-    kamera.release();
-    destroyAllWindows();
+    return static_cast<double>(desteklenen) / aciSayisi;
+}
 
-    ofstream rapor("odev1_aciklama.txt");
+int main()
+{
+    try
+    {
+        vector<String> dosyalar;
+        dosyalariBul(dosyalar);
 
-    rapor
-        << "Ardisik kareler griye donusturulup yumusatilmistir.\n"
-        << "Mutlak kare farki esiklenerek hareket maskesi elde edilmistir.\n"
-        << "Kucuk gurultuler morfolojik islemlerle azaltilmistir.\n"
-        << "Yeterli hareket varsa hareket bolgelerinden ROI secilmistir.\n"
-        << "YCbCr donusumu ve ten esiklemesi yalniz ROI icinde yapilmistir.\n"
-        << "Hareketli ve ten adayi pikseller yesile boyanmistir.\n"
-        << "Diger pikseller arka plan kabul edilip korunmustur.\n\n"
-        << "Fark esigi: " << farkEsigi << "\n"
-        << "Minimum hareket pikseli: " << minimumHareketPikseli << "\n"
-        << "Minimum kontur alani: " << minimumBolgeAlani << "\n"
-        << "Ten esikleri: 133<=Cr<=173, 77<=Cb<=127.\n\n"
-        << "Sinirlamalar:\n"
-        << "Kamera hareketi ve ani isik degisimi hareket sanilabilir.\n"
-        << "Hareketsiz kalan kisi arka plan kabul edilir.\n"
-        << "Ten esikleri her ten tonu ve isik kosulunda basarili degildir.\n"
-        << "Bu uygulama kisi tanima degil, hareketli ten adayi tespitidir.\n";
+        if (dosyalar.empty())
+        {
+            cerr << "trafik klasorunde goruntu bulunamadi!" << endl;
+            return -1;
+        }
+
+        ofstream rapor("odev2_sonuclar.csv");
+
+        if (!rapor)
+        {
+            cerr << "Rapor olusturulamadi!" << endl;
+            return -1;
+        }
+
+        rapor << "goruntu_no,rgb_kirmizi,hsv_kirmizi,"
+            << "lab_kirmizi,hough_adayi,kabul_edilen\n";
+
+        const double minimumKirmiziOrani = 0.55;
+        const double houghOyEsigi = 18.0;
+
+        int islenen = 0;
+
+        for (const String& dosya : dosyalar)
+        {
+            Mat resim = imread(dosya, IMREAD_COLOR);
+
+            if (resim.empty())
+            {
+                cout << "Okunamadi: " << dosya << endl;
+                continue;
+            }
+
+            int kisaKenar = min(resim.cols, resim.rows);
+            int uzunKenar = max(resim.cols, resim.rows);
+
+            double olcek = kisaKenar < 100
+                ? 100.0 / kisaKenar
+                : 1.0;
+
+            if (uzunKenar * olcek > 800)
+                olcek = 800.0 / uzunKenar;
+
+            if (abs(olcek - 1.0) > 0.001)
+            {
+                Mat boyutlandirilmis;
+
+                resize(
+                    resim, boyutlandirilmis,
+                    Size(), olcek, olcek,
+                    olcek < 1.0 ? INTER_AREA : INTER_CUBIC
+                );
+
+                resim = boyutlandirilmis;
+            }
+
+            Mat rgbMaske, hsvMaske, labMaske, ortakMaske;
+
+            kirmiziMaskeleri(
+                resim,
+                rgbMaske,
+                hsvMaske,
+                labMaske,
+                ortakMaske
+            );
+
+            Mat gri;
+            cvtColor(resim, gri, COLOR_BGR2GRAY);
+            GaussianBlur(gri, gri, Size(5, 5), 1.2);
+
+            vector<Vec3f> adaylar;
+
+            int maksimumYaricap =
+                min(resim.cols, resim.rows) / 2;
+
+            double minimumMerkezMesafesi =
+                max(12.0, min(resim.cols, resim.rows) / 8.0);
+
+            HoughCircles(
+                gri,
+                adaylar,
+                HOUGH_GRADIENT,
+                1.0,
+                minimumMerkezMesafesi,
+                100.0,
+                houghOyEsigi,
+                4,
+                maksimumYaricap
+            );
+
+            Mat sonuc = resim.clone();
+            int kabulEdilen = 0;
+
+            for (const Vec3f& c : adaylar)
+            {
+                double oran = cevreKirmiziOrani(ortakMaske, c);
+
+                if (oran < minimumKirmiziOrani)
+                    continue;
+
+                Point merkez(cvRound(c[0]), cvRound(c[1]));
+                int yaricap = cvRound(c[2]);
+
+                circle(
+                    sonuc, merkez, yaricap,
+                    Scalar(0, 255, 0), 2, LINE_AA
+                );
+
+                circle(
+                    sonuc, merkez, 2,
+                    Scalar(255, 0, 0), FILLED
+                );
+
+                putText(
+                    sonuc,
+                    format("Kirmizi: %.0f%%", oran * 100.0),
+                    Point(
+                        max(0, merkez.x - yaricap),
+                        max(15, merkez.y - yaricap - 5)
+                    ),
+                    FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    Scalar(0, 200, 0),
+                    1
+                );
+
+                kabulEdilen++;
+            }
+
+            string onEk = "odev2_" + to_string(++islenen);
+
+            bool kayit = true;
+
+            kayit &= imwrite(onEk + "_girdi.png", resim);
+            kayit &= imwrite(onEk + "_rgb_maske.png", rgbMaske);
+            kayit &= imwrite(onEk + "_hsv_maske.png", hsvMaske);
+            kayit &= imwrite(onEk + "_lab_maske.png", labMaske);
+            kayit &= imwrite(onEk + "_ortak_maske.png", ortakMaske);
+            kayit &= imwrite(onEk + "_sonuc.png", sonuc);
+
+            cout << "\nGoruntu " << islenen << ": " << dosya << endl;
+            cout << "Hough adayi: " << adaylar.size()
+                << " | Kabul edilen: " << kabulEdilen << endl;
+
+            if (!kayit)
+                cerr << "Bazi ciktilar kaydedilemedi!" << endl;
+
+            rapor << islenen << ","
+                << countNonZero(rgbMaske) << ","
+                << countNonZero(hsvMaske) << ","
+                << countNonZero(labMaske) << ","
+                << adaylar.size() << ","
+                << kabulEdilen << "\n";
+
+            namedWindow("Girdi", WINDOW_NORMAL);
+            namedWindow("Kirmizi Maske", WINDOW_NORMAL);
+            namedWindow("Tespit Sonucu", WINDOW_NORMAL);
+
+            imshow("Girdi", resim);
+            imshow("Kirmizi Maske", ortakMaske);
+            imshow("Tespit Sonucu", sonuc);
+
+            int tus = waitKey(200);
+
+            if (tus == 27)
+                break;
+        }
+
+        rapor.close();
+
+        ofstream aciklama("odev2_aciklama.txt");
+
+        aciklama
+            << "RGB, HSV ve Lab uzaylarinda kirmizi maskeleri "
+            << "olusturulmustur.\n"
+            << "En az iki yontemin destekledigi pikseller "
+            << "ortak maskeye alinmistir.\n"
+            << "Gri goruntude HoughCircles ile cember adaylari "
+            << "bulunmustur.\n"
+            << "Cevresindeki acilarin en az %55'inde kirmizi "
+            << "destegi olan adaylar kabul edilmistir.\n"
+            << "Sonuclardaki yesil cemberler kabul edilen adaylardir.\n\n"
+            << "Esikler baslangic degerleridir; veriyle "
+            << "test edilip ayarlanmalidir.\n"
+            << "Egik, kucuk, bulanik veya kismen kapali "
+            << "isaretler kacirilabilir.\n"
+            << "Kirmizi dairesel baska nesneler yanlis "
+            << "tespit edilebilir.\n"
+            << "Bu sistem isaretin anlamini siniflandirmaz.\n"
+            << "Kucuk goruntuleri buyutmek yeni ayrinti eklemez.\n"
+            << "Raporlanan sayilar dogruluk orani degildir; "
+            << "dogruluk icin etiketli referans gerekir.\n";
+
+        aciklama.close();
+
+        cout << "\nIslenen goruntu: " << islenen << endl;
+        cout << "Cikmak icin bir goruntu penceresinde tusa basin."
+            << endl;
+
+        if (islenen > 0)
+            waitKey(0);
+
+        destroyAllWindows();
+    }
+    catch (const exception& hata)
+    {
+        cerr << "Hata: " << hata.what() << endl;
+        return -1;
+    }
 
     return 0;
 }
