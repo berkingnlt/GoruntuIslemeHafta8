@@ -1,172 +1,230 @@
 ﻿#include <opencv2/opencv.hpp>
 #include <iostream>
+#include <string>
 #include <fstream>
-#include <algorithm>
-#include <cmath>
-#include <stdexcept>
 
 using namespace cv;
 using namespace std;
 
-bool rgbTenMi(const Vec3b& p)
-{
-    int B = p[0];
-    int G = p[1];
-    int R = p[2];
-
-    int enBuyuk = max(R, max(G, B));
-    int enKucuk = min(R, min(G, B));
-
-    return R > 50 && G > 20 && B > 10 &&
-        enBuyuk - enKucuk > 15 &&
-        abs(R - G) > 10 &&
-        R > G && R > B;
-}
-
-bool ycrcbTenMi(const Vec3b& p)
-{
-    // OpenCV kanal sirasi: Y, Cr, Cb.
-    int Cr = p[1];
-    int Cb = p[2];
-
-    return Cr >= 133 && Cr <= 173 &&
-        Cb >= 77 && Cb <= 127;
-}
-
-bool hsvTenMi(const Vec3b& p)
-{
-    int H = p[0];
-    int S = p[1];
-    int V = p[2];
-
-    return H <= 25 &&
-        S >= 40 && S <= 230 &&
-        V >= 35;
-}
-
-void sonucuKaydet(
-    const Mat& orijinal,
-    const Mat& maske,
-    const string& isim,
-    ofstream& rapor)
-{
-    Mat sonuc = orijinal.clone();
-
-    for (int y = 0; y < sonuc.rows; y++)
-    {
-        for (int x = 0; x < sonuc.cols; x++)
-        {
-            if (maske.at<uchar>(y, x) == 0)
-                sonuc.at<Vec3b>(y, x) = Vec3b(0, 0, 255);
-        }
-    }
-
-    if (!imwrite("gorev5_" + isim + "_sonuc.bmp", sonuc) ||
-        !imwrite("gorev5_" + isim + "_maske.bmp", maske))
-    {
-        throw runtime_error("Sonuclar kaydedilemedi.");
-    }
-
-    int tenPikseli = countNonZero(maske);
-    double oran = 100.0 * tenPikseli / maske.total();
-
-    cout << isim << " ten adayi: "
-        << tenPikseli << " piksel, %" << oran << endl;
-
-    rapor << isim << " ten adayi: "
-        << tenPikseli << " piksel, %" << oran << "\n";
-
-    namedWindow(isim + " Sonuc", WINDOW_NORMAL);
-    namedWindow(isim + " Maske", WINDOW_NORMAL);
-
-    imshow(isim + " Sonuc", sonuc);
-    imshow(isim + " Maske", maske);
-}
-
 int main()
 {
-    try
+    VideoCapture kamera(0);
+
+    if (!kamera.isOpened())
     {
-        Mat resim = imread("insanlar.jpeg", IMREAD_COLOR);
+        cerr << "Web kamerasi acilamadi!" << endl;
+        return -1;
+    }
 
-        if (resim.empty())
-            throw runtime_error("insanlar.jpeg bulunamadi!");
+    const int farkEsigi = 25;
+    const int minimumHareketPikseli = 500;
+    const double minimumBolgeAlani = 150.0;
 
-        Mat ycrcb, hsv;
+    Mat oncekiGri;
+    Mat cekirdek = getStructuringElement(
+        MORPH_RECT, Size(3, 3)
+    );
 
-        cvtColor(resim, ycrcb, COLOR_BGR2YCrCb);
-        cvtColor(resim, hsv, COLOR_BGR2HSV);
+    int kayitSayisi = 0;
 
-        Mat rgbMaske = Mat::zeros(resim.size(), CV_8UC1);
-        Mat ycrcbMaske = Mat::zeros(resim.size(), CV_8UC1);
-        Mat hsvMaske = Mat::zeros(resim.size(), CV_8UC1);
+    cout << "S: Goruntuleri kaydet\n";
+    cout << "Q veya ESC: Cikis\n";
 
-        for (int y = 0; y < resim.rows; y++)
+    while (true)
+    {
+        Mat kare;
+
+        if (!kamera.read(kare) || kare.empty())
         {
-            for (int x = 0; x < resim.cols; x++)
+            cerr << "Kameradan goruntu alinamadi." << endl;
+            break;
+        }
+
+        resize(kare, kare, Size(640, 480));
+
+        Mat gri;
+        cvtColor(kare, gri, COLOR_BGR2GRAY);
+        GaussianBlur(gri, gri, Size(5, 5), 0);
+
+        if (oncekiGri.empty())
+        {
+            oncekiGri = gri.clone();
+            continue;
+        }
+
+        Mat fark, hareketMaskesi;
+        absdiff(gri, oncekiGri, fark);
+        threshold(fark, hareketMaskesi, farkEsigi, 255, THRESH_BINARY);
+
+        morphologyEx(
+            hareketMaskesi, hareketMaskesi,
+            MORPH_OPEN, cekirdek
+        );
+
+        morphologyEx(
+            hareketMaskesi, hareketMaskesi,
+            MORPH_CLOSE, cekirdek
+        );
+
+        int hareketPikseli = countNonZero(hareketMaskesi);
+
+        Mat sonuc = kare.clone();
+        Mat tenMaskesi = Mat::zeros(kare.size(), CV_8UC1);
+
+        int roiSayisi = 0;
+
+        if (hareketPikseli >= minimumHareketPikseli)
+        {
+            vector<vector<Point>> konturlar;
+
+            Mat konturGirdisi = hareketMaskesi.clone();
+
+            findContours(
+                konturGirdisi,
+                konturlar,
+                RETR_EXTERNAL,
+                CHAIN_APPROX_SIMPLE
+            );
+
+            for (const auto& kontur : konturlar)
             {
-                rgbMaske.at<uchar>(y, x) =
-                    rgbTenMi(resim.at<Vec3b>(y, x)) ? 255 : 0;
+                if (kontur.size() < 3)
+                    continue;
 
-                ycrcbMaske.at<uchar>(y, x) =
-                    ycrcbTenMi(ycrcb.at<Vec3b>(y, x)) ? 255 : 0;
+                int sol = kontur[0].x;
+                int sag = kontur[0].x;
+                int ust = kontur[0].y;
+                int alt = kontur[0].y;
 
-                hsvMaske.at<uchar>(y, x) =
-                    hsvTenMi(hsv.at<Vec3b>(y, x)) ? 255 : 0;
+                double ikiAlan = 0.0;
+
+                for (size_t i = 0; i < kontur.size(); i++)
+                {
+                    Point p = kontur[i];
+                    Point sonraki = kontur[(i + 1) % kontur.size()];
+
+                    ikiAlan +=
+                        static_cast<double>(p.x) * sonraki.y -
+                        static_cast<double>(sonraki.x) * p.y;
+
+                    if (p.x < sol) sol = p.x;
+                    if (p.x > sag) sag = p.x;
+                    if (p.y < ust) ust = p.y;
+                    if (p.y > alt) alt = p.y;
+                }
+
+                double alan = (ikiAlan < 0 ? -ikiAlan : ikiAlan) / 2.0;
+
+                if (alan < minimumBolgeAlani)
+                    continue;
+
+                Rect roi(sol, ust, sag - sol + 1, alt - ust + 1);
+
+                Mat ycrcb, yerelTenMaskesi;
+
+                cvtColor(kare(roi), ycrcb, COLOR_BGR2YCrCb);
+
+                inRange(
+                    ycrcb,
+                    Scalar(0, 133, 77),
+                    Scalar(255, 173, 127),
+                    yerelTenMaskesi
+                );
+
+                bitwise_and(
+                    yerelTenMaskesi,
+                    hareketMaskesi(roi),
+                    yerelTenMaskesi
+                );
+
+                Mat hedefMaske = tenMaskesi(roi);
+
+                bitwise_or(
+                    hedefMaske,
+                    yerelTenMaskesi,
+                    hedefMaske
+                );
+
+                rectangle(sonuc, roi, Scalar(0, 255, 255), 2);
+
+                roiSayisi++;
             }
         }
 
-        ofstream rapor("gorev5_karsilastirma.txt");
+        sonuc.setTo(Scalar(0, 255, 0), tenMaskesi);
 
-        if (!rapor)
-            throw runtime_error("Rapor olusturulamadi.");
+        putText(
+            sonuc,
+            "Hareket: " + to_string(hareketPikseli) +
+            "  ROI: " + to_string(roiSayisi),
+            Point(10, 25),
+            FONT_HERSHEY_SIMPLEX,
+            0.6,
+            Scalar(255, 255, 255),
+            2
+        );
 
-        rapor << "TEN TESPITI KARSILASTIRMASI\n\n";
+        putText(
+            sonuc,
+            "Ten adayi: " + to_string(countNonZero(tenMaskesi)),
+            Point(10, 50),
+            FONT_HERSHEY_SIMPLEX,
+            0.6,
+            Scalar(255, 255, 255),
+            2
+        );
 
-        rapor << "RGB: R>50, G>20, B>10, max-min>15, "
-            << "|R-G|>10, R>G, R>B.\n";
+        imshow("Orijinal", kare);
+        imshow("Hareket Maskesi", hareketMaskesi);
+        imshow("Hareketli ROI - Ten Tespiti", sonuc);
+        imshow("Hareketli Ten Maskesi", tenMaskesi);
 
-        rapor << "YCbCr: 133<=Cr<=173, 77<=Cb<=127.\n";
+        oncekiGri = gri.clone();
 
-        rapor << "HSV: 0<=H<=25, 40<=S<=230, V>=35.\n\n";
+        int tus = waitKey(1);
 
-        if (!imwrite("gorev5_orijinal.bmp", resim))
-            throw runtime_error("Orijinal kaydedilemedi.");
+        if (tus == 27 || tus == 'q' || tus == 'Q')
+            break;
 
-        sonucuKaydet(resim, rgbMaske, "RGB", rapor);
-        sonucuKaydet(resim, ycrcbMaske, "YCbCr", rapor);
-        sonucuKaydet(resim, hsvMaske, "HSV", rapor);
+        if (tus == 's' || tus == 'S')
+        {
+            string onEk =
+                "odev1_kayit_" + to_string(++kayitSayisi);
 
-        rapor
-            << "\nYORUM:\n"
-            << "Ten adayi pikseller orijinal renkleriyle "
-            << "korunmus, diger pikseller tam kirmizi yapilmistir.\n"
-            << "Maskelerde beyaz ten adayi, siyah ten disidir.\n\n"
-            << "RGB'de parlaklik ve renk bilgisi birlikte "
-            << "degistigi icin sabit esikler isiktan etkilenir.\n"
-            << "YCbCr'de renk farki kanallari, HSV'de ise "
-            << "ton ve doygunluk bilgisi kullanilabilir.\n"
-            << "Bu ayrimlar ten tespitini kolaylastirabilir; "
-            << "ancak aydinlatmadan tam bagimsizlik saglamaz.\n\n"
-            << "Kullanilan esikler baslangic degerleridir. "
-            << "Farkli ten tonlari ve golgeler kacirilabilir; "
-            << "ten rengine benzeyen kiyafet veya arka planlar "
-            << "yanlis secilebilir.\n"
-            << "Secilen piksel yuzdesi basari orani degildir. "
-            << "Dogruluk icin elle etiketlenmis referans maske gerekir.\n";
+            bool basarili = true;
 
-        rapor.close();
+            basarili &= imwrite(onEk + "_orijinal.bmp", kare);
+            basarili &= imwrite(onEk + "_hareket.bmp", hareketMaskesi);
+            basarili &= imwrite(onEk + "_ten_maskesi.bmp", tenMaskesi);
+            basarili &= imwrite(onEk + "_sonuc.bmp", sonuc);
 
-        namedWindow("Orijinal", WINDOW_NORMAL);
-        imshow("Orijinal", resim);
-
-        waitKey(0);
+            cout << (basarili ? "Kaydedildi: " : "Kayit hatasi: ")
+                << onEk << endl;
+        }
     }
-    catch (const exception& hata)
-    {
-        cerr << "Hata: " << hata.what() << endl;
-        return -1;
-    }
+
+    kamera.release();
+    destroyAllWindows();
+
+    ofstream rapor("odev1_aciklama.txt");
+
+    rapor
+        << "Ardisik kareler griye donusturulup yumusatilmistir.\n"
+        << "Mutlak kare farki esiklenerek hareket maskesi elde edilmistir.\n"
+        << "Kucuk gurultuler morfolojik islemlerle azaltilmistir.\n"
+        << "Yeterli hareket varsa hareket bolgelerinden ROI secilmistir.\n"
+        << "YCbCr donusumu ve ten esiklemesi yalniz ROI icinde yapilmistir.\n"
+        << "Hareketli ve ten adayi pikseller yesile boyanmistir.\n"
+        << "Diger pikseller arka plan kabul edilip korunmustur.\n\n"
+        << "Fark esigi: " << farkEsigi << "\n"
+        << "Minimum hareket pikseli: " << minimumHareketPikseli << "\n"
+        << "Minimum kontur alani: " << minimumBolgeAlani << "\n"
+        << "Ten esikleri: 133<=Cr<=173, 77<=Cb<=127.\n\n"
+        << "Sinirlamalar:\n"
+        << "Kamera hareketi ve ani isik degisimi hareket sanilabilir.\n"
+        << "Hareketsiz kalan kisi arka plan kabul edilir.\n"
+        << "Ten esikleri her ten tonu ve isik kosulunda basarili degildir.\n"
+        << "Bu uygulama kisi tanima degil, hareketli ten adayi tespitidir.\n";
 
     return 0;
 }

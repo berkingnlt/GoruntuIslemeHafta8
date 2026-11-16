@@ -1,0 +1,18 @@
+Ardisik kareler griye donusturulup yumusatilmistir.
+Mutlak kare farki esiklenerek hareket maskesi elde edilmistir.
+Kucuk gurultuler morfolojik islemlerle azaltilmistir.
+Yeterli hareket varsa hareket bolgelerinden ROI secilmistir.
+YCbCr donusumu ve ten esiklemesi yalniz ROI icinde yapilmistir.
+Hareketli ve ten adayi pikseller yesile boyanmistir.
+Diger pikseller arka plan kabul edilip korunmustur.
+
+Fark esigi: 25
+Minimum hareket pikseli: 500
+Minimum kontur alani: 150
+Ten esikleri: 133<=Cr<=173, 77<=Cb<=127.
+
+Sinirlamalar:
+Kamera hareketi ve ani isik degisimi hareket sanilabilir.
+Hareketsiz kalan kisi arka plan kabul edilir.
+Ten esikleri her ten tonu ve isik kosulunda basarili degildir.
+Bu uygulama kisi tanima degil, hareketli ten adayi tespitidir.
