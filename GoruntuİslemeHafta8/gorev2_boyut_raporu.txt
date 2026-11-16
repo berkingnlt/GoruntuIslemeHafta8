@@ -1,0 +1,37 @@
+
+--- RENKLI GORUNTU ---
+Dosya: gorev2_renkli_1000.bmp
+Cozunurluk: 1000 x 1000
+Kanal sayisi: 3
+Kanal basina bit: 8
+Piksel basina bit: 24
+Ham piksel verisi: 3000000 byte
+Satir hizalamali BMP piksel verisi: 3000000 byte
+Gercek dosya boyutu: 3000054 byte
+Gercek dosya boyutu: 2.8611 MiB
+Piksel verisi disindaki dosya alani: 54 byte
+
+--- GRI GORUNTU ---
+Dosya: gorev2_gri_1000.bmp
+Cozunurluk: 1000 x 1000
+Kanal sayisi: 1
+Kanal basina bit: 8
+Piksel basina bit: 8
+Ham piksel verisi: 1000000 byte
+Satir hizalamali BMP piksel verisi: 1000000 byte
+Gercek dosya boyutu: 1001078 byte
+Gercek dosya boyutu: 0.9547 MiB
+Piksel verisi disindaki dosya alani: 1078 byte
+
+Renkli / gri dosya boyutu orani: 2.9968
+
+YORUM:
+Iki goruntunun cozunurlugu aynidir: 1000x1000.
+Renkli goruntu 3 kanal, gri goruntu 1 kanaldir.
+Her kanal 8 bit oldugundan ham veri boyutlari:
+Renkli: 1000*1000*3 = 3000000 byte.
+Gri: 1000*1000*1 = 1000000 byte.
+Ham veri boyutlari arasindaki oran tam 3'tur.
+BMP dosyalarinda basliklar, gri BMP'de renk tablosu ve gerektiginde satir hizalama baytlari da bulunabilir.
+Bu nedenle gercek dosya boyutu ham piksel verisinden buyuktur; dosya boyutu orani tam olarak 3 olmayabilir.
+Bu boyutta iki goruntunun satir uzunluklari 4'un kati oldugu icin satir dolgusu gerekmez.
