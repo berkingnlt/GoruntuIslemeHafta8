@@ -1,0 +1,22 @@
+GOREV 3 - 8K GORUNTU DUZENLEME
+
+Cozunurluk: 7680 x 4320
+Kanal sayisi: 3
+Kanal basina bit: 8
+Piksel sayisi: 33177600
+Ham piksel verisi: 99532800 byte
+
+Islem: Her B, G ve R degerini 2'ye bolme.
+Yontem: Tek is parcacikli piksel dongusu.
+Olcum: std::chrono::steady_clock
+Duzenleme suresi: 812.705100 ms
+Duzenleme suresi: 812705.100000 us
+
+Ornek piksel once (B,G,R): 127,127,127
+Ornek piksel sonra (B,G,R): 63,63,63
+Ornek piksel kontrolu: BASARILI
+
+Acma, kaydetme, goruntu olusturma ve onizleme islemleri olcumun disindadir.
+Tamsayi bolmesi kullanildigi icin tek sayili kanal degerlerinde kesir atilir. Ornek: 255/2=127.
+Kanal degerleri azalir; sonuc goruntu daha koyu gorunur. Algisal parlakligin tam yariya indigi anlami cikartilmamalidir.
+Raporlanan sure tek calistirmanin sonucudur; donanim, derleme ayarlari ve sistem yukune gore degisebilir.

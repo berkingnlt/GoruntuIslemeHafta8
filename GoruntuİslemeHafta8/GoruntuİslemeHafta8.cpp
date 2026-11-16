@@ -1,192 +1,202 @@
 ﻿#include <opencv2/opencv.hpp>
 #include <iostream>
 #include <fstream>
+#include <chrono>
 #include <iomanip>
-#include <string>
 #include <stdexcept>
 
 using namespace cv;
 using namespace std;
 
-long long dosyaBoyutu(const string& dosyaAdi)
-{
-    ifstream dosya(dosyaAdi, ios::binary | ios::ate);
-
-    if (!dosya)
-        throw runtime_error("Dosya acilamadi: " + dosyaAdi);
-
-    return static_cast<long long>(dosya.tellg());
-}
-
-void bilgileriYaz(
-    const string& baslik,
-    const Mat& resim,
-    const string& dosyaAdi,
-    ofstream& rapor)
-{
-    long long hamVeri =
-        static_cast<long long>(resim.rows) *
-        resim.cols * resim.channels();
-
-    long long satirByte =
-        static_cast<long long>(resim.cols) * resim.channels();
-
-    long long hizaliSatirByte =
-        ((satirByte + 3) / 4) * 4;
-
-    long long bmpPikselVerisi =
-        hizaliSatirByte * resim.rows;
-
-    long long gercekBoyut = dosyaBoyutu(dosyaAdi);
-
-    auto yaz = [&](ostream& cikti)
-        {
-            cikti << "\n--- " << baslik << " ---\n";
-            cikti << "Dosya: " << dosyaAdi << "\n";
-            cikti << "Cozunurluk: "
-                << resim.cols << " x " << resim.rows << "\n";
-            cikti << "Kanal sayisi: " << resim.channels() << "\n";
-            cikti << "Kanal basina bit: 8\n";
-            cikti << "Piksel basina bit: "
-                << resim.channels() * 8 << "\n";
-
-            cikti << "Ham piksel verisi: "
-                << hamVeri << " byte\n";
-
-            cikti << "Satir hizalamali BMP piksel verisi: "
-                << bmpPikselVerisi << " byte\n";
-
-            cikti << "Gercek dosya boyutu: "
-                << gercekBoyut << " byte\n";
-
-            cikti << fixed << setprecision(4);
-            cikti << "Gercek dosya boyutu: "
-                << gercekBoyut / (1024.0 * 1024.0)
-                << " MiB\n";
-
-            cikti << "Piksel verisi disindaki dosya alani: "
-                << gercekBoyut - bmpPikselVerisi
-                << " byte\n";
-        };
-
-    yaz(cout);
-    yaz(rapor);
-}
-
 int main()
 {
     try
     {
-        Mat kaynak = imread("insanlar.jpeg", IMREAD_COLOR);
+        const int genislik = 7680;
+        const int yukseklik = 4320;
 
-        if (kaynak.empty())
+        // OpenCV kanal sirasi: B, G, R.
         {
-            throw runtime_error(
-                "insanlar.jpeg bulunamadi! "
-                "Fotografi proje klasorune koy."
-            );
+            Mat uretilen(yukseklik, genislik, CV_8UC3);
+
+            for (int y = 0; y < yukseklik; y++)
+            {
+                Vec3b* satir = uretilen.ptr<Vec3b>(y);
+
+                for (int x = 0; x < genislik; x++)
+                {
+                    satir[x][0] = static_cast<uchar>(
+                        255LL * x / (genislik - 1)
+                        );
+
+                    satir[x][1] = static_cast<uchar>(
+                        255LL * y / (yukseklik - 1)
+                        );
+
+                    satir[x][2] = static_cast<uchar>(
+                        255LL * (x + y) /
+                        (genislik + yukseklik - 2)
+                        );
+                }
+            }
+
+            if (!imwrite("gorev3_8k_orijinal.bmp", uretilen))
+                throw runtime_error("Orijinal BMP kaydedilemedi.");
         }
 
-        Mat hazirlanan;
+        Mat resim = imread(
+            "gorev3_8k_orijinal.bmp",
+            IMREAD_COLOR
+        );
 
+        if (resim.empty())
+            throw runtime_error("8K BMP acilamadi.");
+
+        if (resim.cols != genislik ||
+            resim.rows != yukseklik ||
+            resim.type() != CV_8UC3)
+        {
+            throw runtime_error("Goruntu boyutu veya tipi hatali.");
+        }
+
+        cout << "Cozunurluk: "
+            << resim.cols << " x " << resim.rows << endl;
+
+        cout << "Kanal sayisi: " << resim.channels() << endl;
+        cout << "Piksel sayisi: " << resim.total() << endl;
+
+        // Sonradan gorsel karsilastirma icin kucuk onizleme.
+        // Bu islem olcumun DISINDA.
+        Mat onceOnizleme;
         resize(
-            kaynak,
-            hazirlanan,
-            Size(1000, 1000),
+            resim,
+            onceOnizleme,
+            Size(960, 540),
             0, 0,
             INTER_AREA
         );
 
-        if (!imwrite("gorev2_renkli_1000.bmp", hazirlanan))
-            throw runtime_error("Renkli BMP kaydedilemedi.");
-
-        // 2. Gorevin istedigi gibi BMP dosyasini diskten ac.
-        Mat renkli = imread(
-            "gorev2_renkli_1000.bmp",
-            IMREAD_COLOR
+        Vec3b ornekOnce = resim.at<Vec3b>(
+            yukseklik / 2,
+            genislik / 2
         );
 
-        if (renkli.empty())
-            throw runtime_error("Renkli BMP acilamadi.");
+        // steady_clock, gecen sure olcumu icin uygundur.
+        const auto baslangic = chrono::steady_clock::now();
 
-        // 3. Tek kanalli gri goruntuye donustur.
-        Mat gri;
-        cvtColor(renkli, gri, COLOR_BGR2GRAY);
+        for (int y = 0; y < resim.rows; y++)
+        {
+            Vec3b* satir = resim.ptr<Vec3b>(y);
 
-        // 4. BMP olarak kaydet.
-        if (!imwrite("gorev2_gri_1000.bmp", gri))
-            throw runtime_error("Gri BMP kaydedilemedi.");
+            for (int x = 0; x < resim.cols; x++)
+            {
+                satir[x][0] = satir[x][0] / 2;
+                satir[x][1] = satir[x][1] / 2;
+                satir[x][2] = satir[x][2] / 2;
+            }
+        }
 
-        // 5. Kaydedilen gri dosyayi kanal sayisini
-        // degistirmeden yeniden ac.
-        Mat kaydedilenGri = imread(
-            "gorev2_gri_1000.bmp",
-            IMREAD_UNCHANGED
+        const auto bitis = chrono::steady_clock::now();
+
+        double milisaniye =
+            chrono::duration<double, milli>(
+                bitis - baslangic
+            ).count();
+
+        double mikrosaniye =
+            chrono::duration<double, micro>(
+                bitis - baslangic
+            ).count();
+
+        cout << fixed << setprecision(3);
+        cout << "\nYalniz duzenleme suresi: "
+            << milisaniye << " ms" << endl;
+
+        cout << "Yalniz duzenleme suresi: "
+            << mikrosaniye << " us" << endl;
+
+        if (!imwrite("gorev3_8k_duzenlenmis.bmp", resim))
+            throw runtime_error("Duzenlenmis BMP kaydedilemedi.");
+
+        Vec3b ornekSonra = resim.at<Vec3b>(
+            yukseklik / 2,
+            genislik / 2
         );
 
-        if (kaydedilenGri.empty())
-            throw runtime_error("Gri BMP acilamadi.");
+        bool kontrol =
+            ornekSonra[0] == ornekOnce[0] / 2 &&
+            ornekSonra[1] == ornekOnce[1] / 2 &&
+            ornekSonra[2] == ornekOnce[2] / 2;
 
-        // 6. Disk boyutlarini raporla.
-        ofstream rapor("gorev2_boyut_raporu.txt");
+        // 5. Sonuclari raporla.
+        ofstream rapor("gorev3_sure_raporu.txt");
 
         if (!rapor)
             throw runtime_error("Rapor olusturulamadi.");
 
-        bilgileriYaz(
-            "RENKLI GORUNTU",
-            renkli,
-            "gorev2_renkli_1000.bmp",
-            rapor
-        );
+        rapor << fixed << setprecision(6);
 
-        bilgileriYaz(
-            "GRI GORUNTU",
-            kaydedilenGri,
-            "gorev2_gri_1000.bmp",
-            rapor
-        );
+        rapor << "GOREV 3 - 8K GORUNTU DUZENLEME\n\n";
+        rapor << "Cozunurluk: " << genislik
+            << " x " << yukseklik << "\n";
+        rapor << "Kanal sayisi: 3\n";
+        rapor << "Kanal basina bit: 8\n";
+        rapor << "Piksel sayisi: " << resim.total() << "\n";
 
-        long long renkliBoyut =
-            dosyaBoyutu("gorev2_renkli_1000.bmp");
+        rapor << "Ham piksel verisi: "
+            << static_cast<long long>(genislik) *
+            yukseklik * 3
+            << " byte\n\n";
 
-        long long griBoyut =
-            dosyaBoyutu("gorev2_gri_1000.bmp");
+        rapor << "Islem: Her B, G ve R degerini 2'ye bolme.\n";
+        rapor << "Yontem: Tek is parcacikli piksel dongusu.\n";
+        rapor << "Olcum: std::chrono::steady_clock\n";
 
-        double oran =
-            static_cast<double>(renkliBoyut) / griBoyut;
+        rapor << "Duzenleme suresi: "
+            << milisaniye << " ms\n";
 
-        cout << "\nRenkli / gri dosya boyutu orani: "
-            << oran << endl;
+        rapor << "Duzenleme suresi: "
+            << mikrosaniye << " us\n\n";
 
-        rapor << "\nRenkli / gri dosya boyutu orani: "
-            << oran << "\n\n";
+        rapor << "Ornek piksel once (B,G,R): "
+            << static_cast<int>(ornekOnce[0]) << ","
+            << static_cast<int>(ornekOnce[1]) << ","
+            << static_cast<int>(ornekOnce[2]) << "\n";
+
+        rapor << "Ornek piksel sonra (B,G,R): "
+            << static_cast<int>(ornekSonra[0]) << ","
+            << static_cast<int>(ornekSonra[1]) << ","
+            << static_cast<int>(ornekSonra[2]) << "\n";
+
+        rapor << "Ornek piksel kontrolu: "
+            << (kontrol ? "BASARILI" : "BASARISIZ") << "\n\n";
 
         rapor
-            << "YORUM:\n"
-            << "Iki goruntunun cozunurlugu aynidir: 1000x1000.\n"
-            << "Renkli goruntu 3 kanal, gri goruntu 1 kanaldir.\n"
-            << "Her kanal 8 bit oldugundan ham veri boyutlari:\n"
-            << "Renkli: 1000*1000*3 = 3000000 byte.\n"
-            << "Gri: 1000*1000*1 = 1000000 byte.\n"
-            << "Ham veri boyutlari arasindaki oran tam 3'tur.\n"
-            << "BMP dosyalarinda basliklar, gri BMP'de renk "
-            << "tablosu ve gerektiginde satir hizalama baytlari "
-            << "da bulunabilir.\n"
-            << "Bu nedenle gercek dosya boyutu ham piksel "
-            << "verisinden buyuktur; dosya boyutu orani "
-            << "tam olarak 3 olmayabilir.\n"
-            << "Bu boyutta iki goruntunun satir uzunluklari "
-            << "4'un kati oldugu icin satir dolgusu gerekmez.\n";
+            << "Acma, kaydetme, goruntu olusturma ve onizleme "
+            << "islemleri olcumun disindadir.\n"
+            << "Tamsayi bolmesi kullanildigi icin tek sayili "
+            << "kanal degerlerinde kesir atilir. Ornek: 255/2=127.\n"
+            << "Kanal degerleri azalir; sonuc goruntu daha koyu "
+            << "gorunur. Algisal parlakligin tam yariya "
+            << "indigi anlami cikartilmamalidir.\n"
+            << "Raporlanan sure tek calistirmanin sonucudur; "
+            << "donanim, derleme ayarlari ve sistem yukune "
+            << "gore degisebilir.\n";
 
         rapor.close();
 
-        // 7. Goruntuleri goster.
-        namedWindow("1000x1000 Renkli BMP", WINDOW_NORMAL);
-        namedWindow("1000x1000 Gri BMP", WINDOW_NORMAL);
+        Mat sonraOnizleme;
 
-        imshow("1000x1000 Renkli BMP", renkli);
-        imshow("1000x1000 Gri BMP", kaydedilenGri);
+        resize(
+            resim,
+            sonraOnizleme,
+            Size(960, 540),
+            0, 0,
+            INTER_AREA
+        );
+
+        imshow("8K Orijinal - Kucuk Onizleme", onceOnizleme);
+        imshow("8K Ikiye Bolunmus - Kucuk Onizleme", sonraOnizleme);
 
         waitKey(0);
     }
